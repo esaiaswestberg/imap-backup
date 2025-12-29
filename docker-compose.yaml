@@ -1,6 +1,6 @@
 services:
   imap-backup:
-    build: .
+    image: ghcr.io/esaiaswestberg/imap-backup:nightly
     container_name: imap-backup
     restart: unless-stopped
     volumes:
