@@ -1,0 +1,16 @@
+services:
+  imap-backup:
+    build: .
+    container_name: imap-backup
+    restart: unless-stopped
+    volumes:
+      - ./output:/app/output
+      - ./accounts.yaml:/app/accounts.yaml:ro
+    environment:
+      - BACKUP_OUTPUT_DIR=./output
+      - BACKUP_INTERVAL_MINUTES=60
+      - BACKUP_ACCOUNTS_FILE=accounts.yaml
+      - BACKUP_RUN_ON_INTERVAL=true
+      - BACKUP_IDLE=true
+    # env_file:
+    #   - .env

@@ -63,3 +63,28 @@ Examples:
 ```
 
 **Note:** The restore process will append messages to the server. It attempts to parse the date from the email header but does not preserve IMAP flags (like Seen/Read status) as they are not currently backed up.
+
+## Docker Usage
+
+You can run the application using Docker.
+
+### Using Docker Compose (Recommended)
+
+1.  Configure your `accounts.yaml`.
+2.  (Optional) Adjust settings in `docker-compose.yaml` or create a `.env` file.
+3.  Run the container:
+
+```bash
+docker-compose up -d --build
+```
+
+### Building Manually
+
+```bash
+docker build -t imap-backup .
+docker run -d \
+  -v $(pwd)/output:/app/output \
+  -v $(pwd)/accounts.yaml:/app/accounts.yaml:ro \
+  -e BACKUP_RUN_ON_INTERVAL=true \
+  imap-backup
+```
