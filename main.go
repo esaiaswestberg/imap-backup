@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"flag"
 	"fmt"
 	"io"
 	"log"
+	"net/mail"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -51,9 +54,7 @@ type Account struct {
 func loadConfig() Config {
 	// Load .env file if it exists
 	if err := godotenv.Load(); err != nil {
-		// It's okay if .env doesn't exist, we just log it for debugging purposes
-		// or ignore it silently as we have defaults.
-		// log.Printf("No .env file found")
+		// It's okay if .env doesn't exist
 	}
 
 	cfg := Config{
@@ -180,8 +181,6 @@ func backupAccount(acc Account, outputDir string) {
 }
 
 func syncMailbox(c *client.Client, mboxName string, accountDir string) {
-	// log.Printf("Processing mailbox: %s", mboxName) // Reduced verbosity
-	
 	_, err := c.Select(mboxName, true) // Read-only
 	if err != nil {
 		log.Printf("Failed to select mailbox %s: %v", mboxName, err)
@@ -367,9 +366,131 @@ func monitorAccount(acc Account, outputDir string, wg *sync.WaitGroup) {
 	}
 }
 
+func restoreAccount(acc Account, outputDir string) {
+	log.Printf("Starting RESTORE for account: %s", acc.Name)
+
+	accountDir := filepath.Join(outputDir, sanitizeName(acc.Name))
+	if _, err := os.Stat(accountDir); os.IsNotExist(err) {
+		log.Printf("Backup directory for account %s not found at %s", acc.Name, accountDir)
+		return
+	}
+
+	c, err := connect(acc)
+	if err != nil {
+		log.Printf("Failed to connect to %s: %v", acc.Name, err)
+		return
+	}
+	defer c.Logout()
+
+	entries, err := os.ReadDir(accountDir)
+	if err != nil {
+		log.Printf("Failed to read account directory %s: %v", accountDir, err)
+		return
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			mboxName := entry.Name() // Use directory name as mailbox name
+			mboxPath := filepath.Join(accountDir, mboxName)
+			log.Printf("Restoring mailbox: %s", mboxName)
+
+			// Ensure mailbox exists
+			if err := c.Create(mboxName); err != nil {
+				// Ignore error if it already exists, or better, check explicitly? 
+				// go-imap doesn't have a simple "Exists" check without Listing.
+				// Error message usually indicates if it exists. We'll log and continue.
+				// log.Printf("Debug: Create mailbox error: %v", err)
+			}
+
+			files, err := os.ReadDir(mboxPath)
+			if err != nil {
+				log.Printf("Failed to read mailbox directory %s: %v", mboxPath, err)
+				continue
+			}
+
+			for _, file := range files {
+				if !file.IsDir() && strings.HasSuffix(file.Name(), ".eml") {
+					restoreMessage(c, mboxName, filepath.Join(mboxPath, file.Name()))
+				}
+			}
+		}
+	}
+	log.Printf("Restore complete for account: %s", acc.Name)
+}
+
+func restoreMessage(c *client.Client, mboxName, filePath string) {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		log.Printf("Failed to read message file %s: %v", filePath, err)
+		return
+	}
+
+	// Parse message to get Date
+	r := bytes.NewReader(content)
+	m, err := mail.ReadMessage(r)
+	var date time.Time
+	if err == nil {
+		headerDate := m.Header.Get("Date")
+		parsedDate, err := mail.ParseDate(headerDate)
+		if err == nil {
+			date = parsedDate
+		} else {
+			date = time.Now()
+		}
+	} else {
+		date = time.Now()
+	}
+
+	// Reset reader for Append
+	r.Seek(0, 0)
+
+	// Append to mailbox
+	if err := c.Append(mboxName, nil, date, r); err != nil {
+		log.Printf("Failed to append message %s to %s: %v", filePath, mboxName, err)
+	}
+}
+
 func main() {
+	// Flag parsing
+	restoreAccountName := flag.String("restore-account", "", "Restore specific account by name or 'all'")
+	restoreAccountsList := flag.String("restore-accounts", "", "Comma-separated list of account names to restore")
+	flag.Parse()
+
 	config := loadConfig()
 
+	// Handle Restore Mode
+	if *restoreAccountName != "" || *restoreAccountsList != "" {
+		log.Printf("Starting IMAP Restore Mode")
+		accounts, err := readAccounts(config.AccountsFile)
+		if err != nil {
+			log.Fatalf("Error reading accounts file: %v", err)
+		}
+
+		targetAccounts := make(map[string]bool)
+		if *restoreAccountName == "all" {
+			for _, acc := range accounts {
+				targetAccounts[acc.Name] = true
+			}
+		} else if *restoreAccountName != "" {
+			targetAccounts[*restoreAccountName] = true
+		}
+
+		if *restoreAccountsList != "" {
+			names := strings.Split(*restoreAccountsList, ",")
+			for _, name := range names {
+				targetAccounts[strings.TrimSpace(name)] = true
+			}
+		}
+
+		for _, acc := range accounts {
+			if targetAccounts[acc.Name] {
+				restoreAccount(acc, config.OutputDir)
+			}
+		}
+		return
+	}
+
+	// Normal Backup Mode
 	log.Printf("Starting IMAP Backup")
 	log.Printf("Output Directory: %s", config.OutputDir)
 	log.Printf("Accounts File: %s", config.AccountsFile)
@@ -395,15 +516,11 @@ func main() {
 			go monitorAccount(acc, config.OutputDir, &wg)
 		}
 		
-		// If both modes are on, we also run the interval loop in the background?
-		// Or does IDLE supersede?
-		// Let's run interval in a separate goroutine if enabled
 		if config.RunOnInterval {
 			go func() {
 				for {
 					time.Sleep(time.Duration(config.IntervalMinutes) * time.Minute)
 					log.Printf("Running interval backup...")
-					// Re-read accounts in case they changed? For now, stick to loaded
 					for _, acc := range accounts {
 						backupAccount(acc, config.OutputDir)
 					}
@@ -412,7 +529,7 @@ func main() {
 			}()
 		}
 
-		wg.Wait() // Block forever on IDLE monitors
+		wg.Wait()
 	} else if config.RunOnInterval {
 		for {
 			log.Printf("Sleeping for %d minutes...", config.IntervalMinutes)

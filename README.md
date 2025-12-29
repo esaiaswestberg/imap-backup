@@ -31,3 +31,35 @@ Example:
     port: 993
     security: "SSL/TLS"
 ```
+
+## Usage
+
+### Backup
+
+Run the program to start the backup process based on your configuration.
+
+```bash
+./imap-backup
+```
+
+### Restore
+
+You can restore emails from the backup to the IMAP server using the following CLI arguments:
+
+- `-restore-account`: Restore a specific account by name or use "all" for all accounts.
+- `-restore-accounts`: Restore a comma-separated list of accounts.
+
+Examples:
+
+```bash
+# Restore all accounts
+./imap-backup -restore-account=all
+
+# Restore a specific account
+./imap-backup -restore-account="Personal Email"
+
+# Restore multiple specific accounts
+./imap-backup -restore-accounts="Personal Email,Work Email"
+```
+
+**Note:** The restore process will append messages to the server. It attempts to parse the date from the email header but does not preserve IMAP flags (like Seen/Read status) as they are not currently backed up.
