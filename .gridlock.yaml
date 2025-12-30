@@ -1,0 +1,17 @@
+session:
+  name: imap-backup
+  windows:
+    - name: main
+      panes:
+        - name: gemini
+          command: gemini
+        - name: air
+          command: air
+        - name: project
+          command: clear
+      layout:
+        columns:
+          - gemini
+          - rows:
+              - air
+              - project
