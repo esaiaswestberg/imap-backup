@@ -113,7 +113,7 @@ func fetchAndSaveMessages(c *client.Client, uids []uint32, mboxDir string) {
 		seqSet := new(imap.SeqSet)
 		seqSet.AddNum(batch...)
 
-		section := &imap.BodySectionName{}
+		section := &imap.BodySectionName{Peek: true}
 		messages := make(chan *imap.Message, 10)
 		done := make(chan error, 1)
 		go func() {
